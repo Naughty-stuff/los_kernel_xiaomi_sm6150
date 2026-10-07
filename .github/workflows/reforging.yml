@@ -95,10 +95,16 @@ jobs:
         BUILD_TIME="$(TZ=Asia/Jakarta date '+%d%m%Y-%H%M')"
         # Nama branch bisa mengandung "/" atau karakter aneh, rapikan untuk nama file
         SAFE_REF="$(printf '%s' "$REF_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+        # Label di nama zip: AOSP untuk build AOSP, OEM untuk build MIUI-OOS
+        if [[ "$BUILD_TYPE" == "AOSP" ]]; then
+          TYPE_TAG="AOSP"
+        else
+          TYPE_TAG="OEM"
+        fi
         {
           echo "BUILD_TIME=$BUILD_TIME"
           echo "BUILD_DATE=$(TZ=Asia/Jakarta date '+%b %d %Y')"
-          echo "ARTIFACT_NAME=Reforge-sweet2-${SAFE_REF}-${BUILD_TIME}"
+          echo "ARTIFACT_NAME=Reforge-sweet2-${TYPE_TAG}-${SAFE_REF}-${BUILD_TIME}"
         } >> "$GITHUB_ENV"
 
     - name: 🔧 Setup Compiler
@@ -369,6 +375,61 @@ jobs:
             --data-urlencode parse_mode="Markdown" \
             --data-urlencode text="$TEXT" > /dev/null
         fi
+
+    - name: ☁️ Upload ZIP to CDN
+      id: cdn
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -e
+
+        ZIP_FILE="${ARTIFACT_NAME}.zip"
+
+        RESP="$(curl -sS --fail-with-body -X POST https://cdn.zass.in/upload \
+          -F "file=@${ZIP_FILE}")" || { echo "❌ Upload CDN gagal: $RESP"; exit 1; }
+
+        echo "Response CDN: $RESP"
+
+        # Ambil URL pertama dari response: coba sebagai JSON dulu, kalau bukan cari https:// biasa
+        URL="$(jq -r '.. | strings | select(test("^https?://"))' <<< "$RESP" 2>/dev/null | head -n 1 || true)"
+        if [[ -z "$URL" ]]; then
+          URL="$(grep -oE 'https?://[^"[:space:]\\]+' <<< "$RESP" | head -n 1 || true)"
+        fi
+
+        [[ -n "$URL" ]] || { echo "❌ URL tidak ditemukan di response CDN"; exit 1; }
+
+        echo "✅ CDN URL: $URL"
+        echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+    - name: 📨 Notify Owner - CDN Link
+      if: steps.cdn.outputs.url != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_OWNER_ID: ${{ secrets.TELEGRAM_OWNER_ID }}
+        CDN_URL: ${{ steps.cdn.outputs.url }}
+      run: |
+        if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_OWNER_ID" ]]; then
+          echo "Secret TELEGRAM_OWNER_ID belum diset, kirim ke owner dilewati."
+          exit 0
+        fi
+
+        # Hanya terima URL http(s) tanpa spasi
+        if [[ ! "$CDN_URL" =~ ^https?://[^[:space:]]+$ ]]; then
+          echo "URL tidak valid, dilewati."
+          exit 0
+        fi
+
+        # Teks polos (tanpa parse_mode) supaya karakter di URL tidak merusak format
+        TEXT="🔗 Link download Reforge (${BUILD_TYPE})
+        📦 ${ARTIFACT_NAME}.zip
+        ${CDN_URL}"
+
+        curl -sS --fail-with-body -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          --data-urlencode chat_id="${TELEGRAM_OWNER_ID}" \
+          --data-urlencode text="$TEXT" > /dev/null
 
     - name: 🚨 Notify - Build Failed
       if: failure()
