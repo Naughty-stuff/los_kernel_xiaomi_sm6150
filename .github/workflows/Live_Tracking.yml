@@ -22,8 +22,8 @@ jobs:
       - name: 📡 Create Telegram Tracker
         id: telegram
         env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          NEVER_DIE_ID: ${{ secrets.NEVER_DIE_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BUILD_TIME: ${{ steps.time.outputs.build_time }}
         run: |
           TEXT="🔨 AGNI REFORGE
@@ -37,8 +37,8 @@ jobs:
           Build: #${BUILD_TIME}
           Run: #${GITHUB_RUN_NUMBER}"
 
-          R="$(curl -fsS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
-            --data-urlencode "chat_id=${NEVER_DIE_ID}" \
+          R="$(curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "parse_mode=HTML" \
             --data-urlencode "text=${TEXT}")"
 
@@ -51,13 +51,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: tracker
     env:
-      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-      NEVER_DIE_ID: ${{ secrets.NEVER_DIE_ID }}
       MESSAGE_ID: ${{ needs.tracker.outputs.message_id }}
       BUILD_TIME: ${{ needs.tracker.outputs.build_time }}
     steps:
       - name: 📡 Live Tracking
         env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -u
@@ -117,16 +117,16 @@ jobs:
             [ "$text" = "$LAST" ] && [ -z "$markup" ] && return 0
 
             if [ -n "$markup" ]; then
-              r="$(curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/editMessageText" \
-                --data-urlencode "chat_id=${NEVER_DIE_ID}" \
+              r="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText" \
+                --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
                 --data-urlencode "message_id=${MESSAGE_ID}" \
                 --data-urlencode "parse_mode=HTML" \
                 --data-urlencode "disable_web_page_preview=true" \
                 --data-urlencode "text=${text}" \
                 --data-urlencode "reply_markup=${markup}")"
             else
-              r="$(curl -sS -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/editMessageText" \
-                --data-urlencode "chat_id=${NEVER_DIE_ID}" \
+              r="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText" \
+                --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
                 --data-urlencode "message_id=${MESSAGE_ID}" \
                 --data-urlencode "parse_mode=HTML" \
                 --data-urlencode "disable_web_page_preview=true" \
