@@ -35,7 +35,6 @@ concurrency:
 # supaya script pihak ketiga (NoMount, KernelSU) dan proses build tidak bisa membacanya.
 env:
   DEVICE_CODENAME: "sweet2"
-  MAINTAINER: "Ghnkz"
   # Input dilempar lewat env, bukan di-inline ke script shell (cegah injection)
   BUILD_TYPE: ${{ github.event.inputs.build_type }}
   COMPILER: ${{ github.event.inputs.compiler }}
@@ -103,6 +102,7 @@ jobs:
         } >> "$GITHUB_ENV"
 
     - name: 🔧 Setup Compiler
+      id: compiler
       shell: bash
       run: |
         set -euo pipefail
@@ -214,7 +214,8 @@ jobs:
         📱 Device: \`${DEVICE_CODENAME}\`
         📅 Build date: \`${BUILD_DATE}\`
         ⚙️ Compiler: \`${COMPILER}\`
-        🧑‍🔧 Maintainer: \`${MAINTAINER}\`"
+        📦 Build type: \`${BUILD_TYPE}\`
+        👤 By: \`${ACTOR}\`"
 
         curl -sS --fail-with-body -X POST \
           "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
@@ -223,6 +224,7 @@ jobs:
           --data-urlencode text="$TEXT" > /dev/null
 
     - name: 🛠️ Build Kernel
+      id: build
       shell: bash
       run: |
         set -e
@@ -267,6 +269,7 @@ jobs:
         cp out/.config out/sweet_defconfig.txt
 
     - name: ✅ Verify Kernel Build
+      id: verify
       shell: bash
       run: |
         set -e
@@ -291,42 +294,6 @@ jobs:
           echo "Kernel compilation failed."
           exit 1
         fi
-
-    - name: 📨 Notify - Build Kernel Finished
-      if: always()
-      continue-on-error: true
-      shell: bash
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        JOB_STATUS: ${{ job.status }}
-        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      run: |
-        if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
-          echo "Secret Telegram belum diset, notifikasi dilewati."
-          exit 0
-        fi
-
-        if [[ "$JOB_STATUS" == "success" ]]; then
-          TEXT="✅ *Reforge Kernel — Build Finished Successfully*
-        📱 Device: \`${DEVICE_CODENAME}\`
-        📅 Build date: \`${BUILD_DATE}\`
-        ⚙️ Compiler: \`${COMPILER}\`
-        🧑‍🔧 Maintainer: \`${MAINTAINER}\`"
-        else
-          TEXT="❌ *Reforge Kernel — Build ${JOB_STATUS^^}*
-        📱 Device: \`${DEVICE_CODENAME}\`
-        📅 Build date: \`${BUILD_DATE}\`
-        ⚙️ Compiler: \`${COMPILER}\`
-        🧑‍🔧 Maintainer: \`${MAINTAINER}\`
-        🔗 Run: ${RUN_URL}"
-        fi
-
-        curl -sS --fail-with-body -X POST \
-          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-          --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" \
-          --data-urlencode parse_mode="Markdown" \
-          --data-urlencode text="$TEXT" > /dev/null
 
     - name: 💾 Upload configs
       uses: actions/upload-artifact@v5
@@ -361,34 +328,75 @@ jobs:
         name: ${{ env.ARTIFACT_NAME }}
         path: ${{ env.ARTIFACT_NAME }}.zip
 
-    - name: 📨 Kirim ke Telegram
+    - name: 📨 Notify - Build Finished (with file)
       continue-on-error: true
       shell: bash
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       run: |
         set -e
 
         if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
-          echo "Secret Telegram belum diset, upload ke Telegram dilewati."
+          echo "Secret Telegram belum diset, notifikasi dilewati."
           exit 0
         fi
 
         ZIP_FILE="${ARTIFACT_NAME}.zip"
 
-        CAPTION="🛠️ *Reforge Kernel Build*
+        CAPTION="✅ *Reforge Kernel — Build Finished*
         📱 Device: \`${DEVICE_CODENAME}\`
         📅 Build date: \`${BUILD_DATE}\`
         ⚙️ Compiler: \`${COMPILER}\`
-        🧑‍🔧 Maintainer: \`${MAINTAINER}\`
         📦 Build type: \`${BUILD_TYPE}\`
         🌿 Branch: \`${REF_NAME}\`
         👤 By: \`${ACTOR}\`"
 
-        curl -sS --fail-with-body -X POST \
+        if ! curl -sS --fail-with-body -X POST \
           "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
           -F chat_id="${TELEGRAM_CHAT_ID}" \
           -F document=@"${ZIP_FILE}" \
           -F caption="${CAPTION}" \
-          -F parse_mode="Markdown" > /dev/null
+          -F parse_mode="Markdown" > /dev/null; then
+
+          # Bot API membatasi upload 50 MB. Kalau gagal, kirim teks + link artifact.
+          echo "Upload file gagal, kirim notifikasi teks saja."
+          TEXT="${CAPTION}"$'\n'"📎 File ada di Artifacts: ${RUN_URL}"
+          curl -sS --fail-with-body -X POST \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" \
+            --data-urlencode parse_mode="Markdown" \
+            --data-urlencode text="$TEXT" > /dev/null
+        fi
+
+    - name: 🚨 Notify - Build Failed
+      if: failure()
+      continue-on-error: true
+      shell: bash
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        FAILED_STAGE: ${{ steps.compiler.outcome == 'failure' && 'Setup Compiler' || steps.build.outcome == 'failure' && 'Build Kernel' || steps.verify.outcome == 'failure' && 'Verify Kernel Build' || 'Step lain (cek log)' }}
+      run: |
+        if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]]; then
+          echo "Secret Telegram belum diset, notifikasi dilewati."
+          exit 0
+        fi
+
+        TEXT="❌ *Reforge Kernel — Build FAILED*
+        📱 Device: \`${DEVICE_CODENAME}\`
+        📅 Build date: \`${BUILD_DATE}\`
+        ⚙️ Compiler: \`${COMPILER}\`
+        📦 Build type: \`${BUILD_TYPE}\`
+        🌿 Branch: \`${REF_NAME}\`
+        👤 By: \`${ACTOR}\`
+        🧩 Stage: \`${FAILED_STAGE}\`
+        🔗 Run: ${RUN_URL}"
+
+        curl -sS --fail-with-body -X POST \
+          "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" \
+          --data-urlencode parse_mode="Markdown" \
+          --data-urlencode text="$TEXT" > /dev/null
