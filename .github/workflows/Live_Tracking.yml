@@ -62,7 +62,12 @@ jobs:
         run: |
           set -u
           API="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100"
+          ART_API="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
           LAST=""
+
+          # URL CDN per varian (diisi setelah job build-nya sukses)
+          URL_K=""; URL_O=""; URL_N=""
+          TRIED_K=0; TRIED_O=0; TRIED_N=0
 
           duration() {
             local s="$1"
@@ -111,10 +116,37 @@ jobs:
             echo "⏳  Waiting"
           }
 
-          update() {
-            local text="$1" markup="${2:-}" r d
+          # Ambil URL CDN dari artifact kecil "cdnurl-<varian>" yang diupload job build
+          get_url() {
+            local name="cdnurl-$1" arts aurl tmp
+            arts="$(curl -fsS \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${ART_API}?name=${name}")" || return 0
+            aurl="$(jq -r '.artifacts[0].archive_download_url // empty' <<< "$arts")"
+            [ -n "$aurl" ] || return 0
+            tmp="$(mktemp)"
+            if curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "$aurl" -o "$tmp"; then
+              unzip -p "$tmp" cdn_url.txt 2>/dev/null | head -n 1 | tr -d '\r\n'
+            fi
+            rm -f "$tmp"
+          }
 
-            [ "$text" = "$LAST" ] && [ -z "$markup" ] && return 0
+          # Tombol download per varian (hanya yang URL-nya sudah ada)
+          build_kb() {
+            jq -nrc --arg a "$URL_K" --arg o "$URL_O" --arg n "$URL_N" '
+              [ (if $a != "" then {text:"📥 Download AOSP",   url:$a} else empty end),
+                (if $o != "" then {text:"📥 Download OEM",    url:$o} else empty end),
+                (if $n != "" then {text:"📥 Download Non-KSU", url:$n} else empty end) ] as $b
+              | if ($b | length) == 0 then "" else {inline_keyboard: ($b | map([.]))} end'
+          }
+
+          update() {
+            local text="$1" markup="${2:-}" r d key
+
+            key="${text}|${markup}"
+            [ "$key" = "$LAST" ] && return 0
 
             if [ -n "$markup" ]; then
               r="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText" \
@@ -139,7 +171,7 @@ jobs:
               echo "Telegram update failed: $d"
               return 1
             fi
-            LAST="$text"
+            LAST="$key"
           }
 
           while true; do
@@ -160,6 +192,13 @@ jobs:
             OC="$(jq -r '.conclusion // empty' <<< "$OEM")"
             NC="$(jq -r '.conclusion // empty' <<< "$NON")"
 
+            # Begitu sebuah varian sukses, ambil URL CDN-nya (satu kali percobaan)
+            if [ "$KC" = success ] && [ "$TRIED_K" -eq 0 ]; then URL_K="$(get_url KSU-AOSP)"; TRIED_K=1; fi
+            if [ "$OC" = success ] && [ "$TRIED_O" -eq 0 ]; then URL_O="$(get_url KSU-OEM)";  TRIED_O=1; fi
+            if [ "$NC" = success ] && [ "$TRIED_N" -eq 0 ]; then URL_N="$(get_url Non-KSU)";  TRIED_N=1; fi
+
+            KEYBOARD="$(build_kb)"
+
             if [ "$KC" = success ] && [ "$OC" = success ] && [ "$NC" = success ]; then
               TEXT="🔨 AGNI REFORGE
           ━━━━━━━━━━━━━━━━━━━━
@@ -174,10 +213,6 @@ jobs:
 
           ━━━━━━━━━━━━━━━━━━━━
           ✅ All builds completed successfully."
-
-              KEYBOARD="$(jq -nc --arg url \
-                "https://sourceforge.net/projects/dirty-project/files/Reforge-Kernel/${BUILD_TIME}/" \
-                '{inline_keyboard:[[{"text":"📥 Download","url":$url}]]}')"
 
               update "$TEXT" "$KEYBOARD" || true
               exit 0
@@ -201,7 +236,7 @@ jobs:
           ━━━━━━━━━━━━━━━━━━━━
           ❌ One or more builds failed."
 
-                update "$TEXT" || true
+                update "$TEXT" "$KEYBOARD" || true
                 exit 0
               fi
             fi
@@ -217,7 +252,7 @@ jobs:
           Build: #${BUILD_TIME}
           Run: #${GITHUB_RUN_NUMBER}"
 
-            update "$TEXT" || true
+            update "$TEXT" "$KEYBOARD" || true
             sleep 7
           done
 
@@ -231,10 +266,10 @@ jobs:
         build_type: [KSU-AOSP, KSU-OEM, Non-KSU]
 
     env:
-      KBUILD_BUILD_USER: Manipulator
+      KBUILD_BUILD_USER: Naughty-stuff
       KBUILD_BUILD_HOST: LineageOS
-      SOURCEFORGE_PROJECT: ${{ secrets.SOURCEFORGE_PROJECT }}
-      SOURCEFORGE_USERNAME: ${{ secrets.SOURCEFORGE_USERNAME }}
+      BUILD_TYPE: ${{ matrix.build_type }}
+      REF_NAME: ${{ github.ref_name }}
       BUILD_TIME: ${{ needs.tracker.outputs.build_time }}
 
     steps:
@@ -243,19 +278,20 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: ⏰ Prepare timezone
+        run: sudo ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+
       - name: 📦 Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison cpio flex aria2 lz4 libssl-dev patchelf rsync openssh-client zip unzip
+          sudo apt-get install -y bc bison cpio flex aria2 lz4 libssl-dev patchelf rsync zip unzip
 
-      - name: 🔐 Setup SourceForge SSH
-        env:
-          SOURCEFORGE_SSH_KEY: ${{ secrets.SOURCEFORGE_SSH_KEY }}
+      - name: ⚙️ Setup Environment
         run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SOURCEFORGE_SSH_KEY" > ~/.ssh/sourceforge_actions
-          chmod 600 ~/.ssh/sourceforge_actions
-          ssh-keyscan -H frs.sourceforge.net >> ~/.ssh/known_hosts
+          set -e
+          # Nama branch bisa mengandung "/" atau karakter aneh, rapikan untuk nama file/artifact
+          SAFE_REF="$(printf '%s' "$REF_NAME" | tr -c 'A-Za-z0-9._-' '-')"
+          echo "SAFE_REF=$SAFE_REF" >> "$GITHUB_ENV"
 
       - name: ⚙️ Setup Neutron Clang
         run: |
@@ -277,13 +313,42 @@ jobs:
           curl -LSs https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh | bash -s main
           curl -LSs https://raw.githubusercontent.com/maxsteeel/nomount/refs/heads/dev/kernel/setup.sh | bash -
 
-      - name: 📱 Apply OEM Display Dimensions
-        if: matrix.build_type == 'KSU-OEM'
+      - name: 📱 Patch Panel Dimensions
+        shell: bash
         run: |
-          sed -i \
-            -e 's/qcom,mdss-pan-physical-width-dimension = <69>;/qcom,mdss-pan-physical-width-dimension = <695>;/g' \
-            -e 's/qcom,mdss-pan-physical-height-dimension = <154>;/qcom,mdss-pan-physical-height-dimension = <1546>;/g' \
-            arch/arm64/boot/dts/qcom/xiaomi/sweet/dsi-panel-k6-38-0c-0a-fhd-dsc-video.dtsi
+          set -e
+
+          apply_panel_dimensions() {
+              local w="$1"
+              local h="$2"
+
+              local files=(
+                  "arch/arm64/boot/dts/qcom/xiaomi/sweet/dsi-panel-k6-38-0e-0b-fhd-dsc-video.dtsi"
+                  "arch/arm64/boot/dts/qcom/xiaomi/sweet/dsi-panel-k6-38-0c-0a-fhd-dsc-video.dtsi"
+              )
+
+              for f in "${files[@]}"; do
+                  if [[ -f "$f" ]]; then
+
+                      echo "Patching $f → ${w}x${h}"
+
+                      sed -i \
+                        "s/\(qcom,mdss-pan-physical-width-dimension[[:space:]]*=[[:space:]]*< *\)[0-9]\+/\1${w}/" \
+                        "$f"
+
+                      sed -i \
+                        "s/\(qcom,mdss-pan-physical-height-dimension[[:space:]]*=[[:space:]]*< *\)[0-9]\+/\1${h}/" \
+                        "$f"
+                  fi
+              done
+          }
+
+          # KSU-OEM = dimensi OEM (MIUI/OOS); KSU-AOSP & Non-KSU = dimensi AOSP
+          if [[ "$BUILD_TYPE" == "KSU-OEM" ]]; then
+              apply_panel_dimensions 695 1546
+          else
+              apply_panel_dimensions 69 156
+          fi
 
       - name: 🧩 Generate Defconfig
         run: make O=out ARCH=arm64 vendor/sweet_defconfig
@@ -304,24 +369,48 @@ jobs:
             KBUILD_BUILD_HOST="$KBUILD_BUILD_HOST" \
             KBUILD_COMPILER_STRING="Neutron clang version 24.0.0"
 
+      - name: ✅ Verify Kernel Build
+        run: |
+          set -e
+          failed=0
+          for file in out/arch/arm64/boot/Image.gz out/arch/arm64/boot/dtbo.img out/arch/arm64/boot/dtb.img; do
+            if [[ ! -f "$file" ]]; then
+              echo "❌ Missing: $file"
+              failed=1
+            else
+              echo "✅ Found: $file"
+              ls -lh "$file"
+            fi
+          done
+          [[ "$failed" -eq 0 ]] || { echo "Kernel compilation failed."; exit 1; }
+
       - name: 📄 Save Defconfig
         run: cp out/.config out/sweet_defconfig.txt
 
-      - name: 📦 Prepare AnyKernel3
+      - name: 📂 Clone AnyKernel3 & Zip
+        shell: bash
         run: |
-          git clone --depth=1 --branch reforge https://github.com/manipvlator/Anykernel3.git AnyKernel3
-          cp out/arch/arm64/boot/{Image.gz,dtbo.img,dtb.img} AnyKernel3/
+          set -e
 
-      - name: 🗜️ Create Flashable ZIP
-        run: |
-          ZIP_NAME="reforge_${{ matrix.build_type }}-${{ github.ref_name }}-${BUILD_TIME}.zip"
+          git clone \
+            --depth=1 \
+            https://github.com/Naughty-stuff/anykernel3.git \
+            AnyKernel3
+
+          cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
+          cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
+          cp out/arch/arm64/boot/dtb.img AnyKernel3/dtb.img
+
+          ZIP_NAME="reforge_${BUILD_TYPE}-${SAFE_REF}-${BUILD_TIME}.zip"
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
-          (cd AnyKernel3 && zip -r9 "../$ZIP_NAME" . -x ".git/*")
+
+          cd AnyKernel3
+          zip -r9 "../${ZIP_NAME}" . -x ".git/*"
 
       - name: 📤 Upload ZIP Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: reforge_${{ matrix.build_type }}-${{ github.ref_name }}-${{ env.BUILD_TIME }}
+          name: reforge_${{ matrix.build_type }}-${{ env.SAFE_REF }}-${{ env.BUILD_TIME }}
           path: AnyKernel3/*
 
       - name: 📤 Upload Defconfig Artifact
@@ -330,24 +419,40 @@ jobs:
           name: configs-${{ matrix.build_type }}-${{ env.BUILD_TIME }}
           path: out/sweet_defconfig.txt
 
-      - name: 🚀 Upload ZIP to SourceForge
+      - name: ☁️ Upload ZIP to CDN
+        id: cdn
+        continue-on-error: true
+        shell: bash
         run: |
-          BASE="/home/frs/project/${SOURCEFORGE_PROJECT}/Reforge-Kernel"
-          PATH_SF="${BASE}/${BUILD_TIME}"
+          set -e
 
-          sftp -i ~/.ssh/sourceforge_actions -oBatchMode=yes -oStrictHostKeyChecking=yes \
-            "${SOURCEFORGE_USERNAME}@frs.sourceforge.net" <<EOF
-          -mkdir ${BASE}
-          -mkdir ${PATH_SF}
-          bye
-          EOF
+          RESP="$(curl -sS --fail-with-body -X POST https://cdn.zass.in/upload \
+            -F "file=@${ZIP_NAME}")" || { echo "❌ Upload CDN gagal: $RESP"; exit 1; }
 
-          sftp -i ~/.ssh/sourceforge_actions -oBatchMode=yes -oStrictHostKeyChecking=yes \
-            "${SOURCEFORGE_USERNAME}@frs.sourceforge.net" <<EOF
-          cd ${PATH_SF}
-          put ${ZIP_NAME}
-          bye
-          EOF
+          echo "Response CDN: $RESP"
+
+          # Ambil URL pertama dari response: coba sebagai JSON dulu, kalau bukan cari https:// biasa
+          URL="$(jq -r '.. | strings | select(test("^https?://"))' <<< "$RESP" 2>/dev/null | head -n 1 || true)"
+          if [[ -z "$URL" ]]; then
+            URL="$(grep -oE 'https?://[^"[:space:]\\]+' <<< "$RESP" | head -n 1 || true)"
+          fi
+
+          [[ -n "$URL" ]] || { echo "❌ URL tidak ditemukan di response CDN"; exit 1; }
+
+          # Hanya terima URL http(s) tanpa spasi
+          [[ "$URL" =~ ^https?://[^[:space:]]+$ ]] || { echo "❌ URL tidak valid"; exit 1; }
+
+          echo "✅ CDN URL: $URL"
+          printf '%s' "$URL" > cdn_url.txt
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      # Artifact kecil berisi URL CDN, dibaca oleh job Telegram Live Tracker untuk tombol download
+      - name: 🔗 Publish CDN URL for Tracker
+        if: steps.cdn.outputs.url != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: cdnurl-${{ matrix.build_type }}
+          path: cdn_url.txt
 
   final:
     name: Final
