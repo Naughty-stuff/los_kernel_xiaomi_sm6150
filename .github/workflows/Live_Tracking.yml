@@ -35,9 +35,9 @@ jobs:
           # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
           render() {
             local h
-            h="<table bordered><tr><th colspan=\"2\" align=\"center\">AGNI REFORGE</th></tr>"
-            h+="$(row "KSU-AOSP" "$1")$(row "KSU-OEM" "$2")$(row "Non-KSU" "$3")</table>"
-            h+="<table bordered>$(row "Branch" "$GITHUB_REF_NAME")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
+            h="<table bordered><tr><th colspan=\"2\" align=\"center\">🔨 AGNI REFORGE</th></tr>"
+            h+="$(row "🤖 KSU-AOSP" "$1")$(row "🛡️ KSU-OEM" "$2")$(row "🧩 Non-KSU" "$3")</table>"
+            h+="<table bordered>$(row "📱 Device" "Sweet2")$(row "🕒 Build" "#${BUILD_TIME}")$(row "🔢 Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
             printf '%s' "$h"
           }
@@ -46,7 +46,7 @@ jobs:
           rich() { jq -nc --arg h "$1" '{html:$h, skip_entity_detection:true}'; }
 
 
-          TEXT="$(render "Waiting" "Waiting" "Waiting")"
+          TEXT="$(render "⏳ Waiting" "⏳ Waiting" "⏳ Waiting")"
 
           R="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendRichMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
@@ -94,36 +94,36 @@ jobs:
           step() {
             local j="$1" s c n t start now elapsed
 
-            [ -z "$j" ] || [ "$j" = "null" ] && { echo "Waiting"; return; }
+            [ -z "$j" ] || [ "$j" = "null" ] && { echo "⏳ Waiting"; return; }
 
             s="$(jq -r '.status' <<< "$j")"
             c="$(jq -r '.conclusion // empty' <<< "$j")"
 
             if [ "$s" = completed ]; then
               if [ "$c" = success ]; then
-                echo "Done"
+                echo "✅ Done"
               else
                 n="$(jq -r '.steps[] | select(.conclusion=="failure") | .name' <<< "$j" | head -1 | sed 's/[^ -~]//g; s/^ *//')"
-                echo "Failed - ${n:-Failed}"
+                echo "❌ Failed - ${n:-Failed}"
               fi
               return
             fi
 
-            [ "$s" = queued ] && { echo "Waiting"; return; }
+            [ "$s" = queued ] && { echo "⏳ Waiting"; return; }
 
             if [ "$s" = in_progress ]; then
               n="$(jq -r '.steps[] | select(.status=="in_progress") | .name' <<< "$j" | head -1 | sed 's/[^ -~]//g; s/^ *//')"
-              [ -n "$n" ] || { echo "Starting..."; return; }
+              [ -n "$n" ] || { echo "🔄 Starting..."; return; }
 
               t="$(jq -r '.steps[] | select(.status=="in_progress") | .started_at' <<< "$j" | head -1)"
               start="$(date -d "$t" +%s 2>/dev/null || echo 0)"
               now="$(date -u +%s)"
               elapsed=$((now-start))
-              echo "$(duration "$elapsed")  $n"
+              echo "🔄 $(duration "$elapsed")  $n"
               return
             fi
 
-            echo "Waiting"
+            echo "⏳ Waiting"
           }
 
           # Ambil URL CDN dari artifact kecil "cdnurl-<varian>" yang diupload job build
@@ -186,9 +186,9 @@ jobs:
           # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
           render() {
             local h
-            h="<table bordered><tr><th colspan=\"2\" align=\"center\">AGNI REFORGE</th></tr>"
-            h+="$(row "KSU-AOSP" "$1")$(row "KSU-OEM" "$2")$(row "Non-KSU" "$3")</table>"
-            h+="<table bordered>$(row "Branch" "$GITHUB_REF_NAME")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
+            h="<table bordered><tr><th colspan=\"2\" align=\"center\">🔨 AGNI REFORGE</th></tr>"
+            h+="$(row "🤖 KSU-AOSP" "$1")$(row "🛡️ KSU-OEM" "$2")$(row "🧩 Non-KSU" "$3")</table>"
+            h+="<table bordered>$(row "📱 Device" "Sweet2")$(row "🕒 Build" "#${BUILD_TIME}")$(row "🔢 Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
             printf '%s' "$h"
           }
@@ -223,7 +223,7 @@ jobs:
             KEYBOARD="$(build_kb)"
 
             if [ "$KC" = success ] && [ "$OC" = success ] && [ "$NC" = success ]; then
-            TEXT="$(render "Done" "Done" "Done" "All builds completed successfully.")"
+            TEXT="$(render "✅ Done" "✅ Done" "✅ Done" "✅ All builds completed successfully.")"
 
               update "$TEXT" "$KEYBOARD" || true
               exit 0
@@ -233,7 +233,7 @@ jobs:
               if [[ "$KC" =~ ^(failure|cancelled|timed_out)$ ]] ||
                  [[ "$OC" =~ ^(failure|cancelled|timed_out)$ ]] ||
                  [[ "$NC" =~ ^(failure|cancelled|timed_out)$ ]]; then
-              TEXT="$(render "$KSUS" "$OEMS" "$NONS" "One or more builds failed.")"
+              TEXT="$(render "$KSUS" "$OEMS" "$NONS" "❌ One or more builds failed.")"
 
                 update "$TEXT" "$KEYBOARD" || true
                 exit 0
