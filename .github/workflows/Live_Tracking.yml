@@ -27,42 +27,30 @@ jobs:
           BUILD_TIME: ${{ steps.time.outputs.build_time }}
         run: |
           esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
-          rep() { printf '%*s' "$1" '' | sed 's/ /─/g'; }
 
-          # Tabel 2 kolom: tbl "label1" "nilai1" "label2" "nilai2" ...
-          tbl() {
-            local lw=0 vw=0 i j k v a b out
-            for ((i=1; i<=$#; i+=2)); do
-              j=$((i+1)); k="${!i}"; v="${!j}"
-              if [ "${#k}" -gt "$lw" ]; then lw="${#k}"; fi
-              if [ "${#v}" -gt "$vw" ]; then vw="${#v}"; fi
-            done
-            a="$(rep $((lw+2)))"; b="$(rep $((vw+2)))"
-            out="┌${a}┬${b}┐"
-            for ((i=1; i<=$#; i+=2)); do
-              j=$((i+1)); k="${!i}"; v="${!j}"
-              if [ "$i" -gt 1 ]; then out+=$'\n'"├${a}┼${b}┤"; fi
-              out+=$'\n'"$(printf '│ %-*s │ %-*s │' "$lw" "$k" "$vw" "$v")"
-            done
-            out+=$'\n'"└${a}┴${b}┘"
-            printf '%s' "$out"
-          }
+          # Satu baris tabel: row "label" "nilai"
+          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$1" "$(esc <<< "$2")"; }
 
           # render <status KSU-AOSP> <status KSU-OEM> <status Non-KSU> [footer]
+          # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
           render() {
-            local t
-            t="<b>AGNI REFORGE</b>"$'\n'"<pre>$(tbl "KSU-AOSP" "$1" "KSU-OEM" "$2" "Non-KSU" "$3")</pre>"
-            t+=$'\n'"<pre>$(tbl "Branch" "$(esc <<< "$GITHUB_REF_NAME")" "Build" "#${BUILD_TIME}" "Run" "#${GITHUB_RUN_NUMBER}")</pre>"
-            if [ -n "${4:-}" ]; then t+=$'\n\n'"$4"; fi
-            printf '%s' "$t"
+            local h
+            h="<table bordered><tr><th colspan=\"2\" align=\"center\">AGNI REFORGE</th></tr>"
+            h+="$(row "KSU-AOSP" "$1")$(row "KSU-OEM" "$2")$(row "Non-KSU" "$3")</table>"
+            h+="<table bordered>$(row "Branch" "$GITHUB_REF_NAME")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
+            if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
+            printf '%s' "$h"
           }
+
+          # Bungkus HTML jadi parameter rich_message
+          rich() { jq -nc --arg h "$1" '{html:$h, skip_entity_detection:true}'; }
+
 
           TEXT="$(render "Waiting" "Waiting" "Waiting")"
 
-          R="$(curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          R="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendRichMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "parse_mode=HTML" \
-            --data-urlencode "text=${TEXT}")"
+            --data-urlencode "rich_message=$(rich "$TEXT")")"
 
           ID="$(echo "$R" | jq -r '.result.message_id // empty')"
           [ -n "$ID" ] || { echo "$R"; exit 1; }
@@ -166,26 +154,19 @@ jobs:
 
           update() {
             local text="$1" markup="${2:-}" r d key
+            local args=()
 
             key="${text}|${markup}"
             [ "$key" = "$LAST" ] && return 0
 
+            args=(--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}"
+                  --data-urlencode "message_id=${MESSAGE_ID}"
+                  --data-urlencode "rich_message=$(rich "$text")")
             if [ -n "$markup" ]; then
-              r="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText" \
-                --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-                --data-urlencode "message_id=${MESSAGE_ID}" \
-                --data-urlencode "parse_mode=HTML" \
-                --data-urlencode "disable_web_page_preview=true" \
-                --data-urlencode "text=${text}" \
-                --data-urlencode "reply_markup=${markup}")"
-            else
-              r="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText" \
-                --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-                --data-urlencode "message_id=${MESSAGE_ID}" \
-                --data-urlencode "parse_mode=HTML" \
-                --data-urlencode "disable_web_page_preview=true" \
-                --data-urlencode "text=${text}")"
+              args+=(--data-urlencode "reply_markup=${markup}")
             fi
+
+            r="$(curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText" "${args[@]}")"
 
             d="$(jq -r '.description // empty' <<< "$r")"
             if [ "$(jq -r '.ok // false' <<< "$r")" != true ] &&
@@ -197,35 +178,23 @@ jobs:
           }
 
           esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
-          rep() { printf '%*s' "$1" '' | sed 's/ /─/g'; }
 
-          # Tabel 2 kolom: tbl "label1" "nilai1" "label2" "nilai2" ...
-          tbl() {
-            local lw=0 vw=0 i j k v a b out
-            for ((i=1; i<=$#; i+=2)); do
-              j=$((i+1)); k="${!i}"; v="${!j}"
-              if [ "${#k}" -gt "$lw" ]; then lw="${#k}"; fi
-              if [ "${#v}" -gt "$vw" ]; then vw="${#v}"; fi
-            done
-            a="$(rep $((lw+2)))"; b="$(rep $((vw+2)))"
-            out="┌${a}┬${b}┐"
-            for ((i=1; i<=$#; i+=2)); do
-              j=$((i+1)); k="${!i}"; v="${!j}"
-              if [ "$i" -gt 1 ]; then out+=$'\n'"├${a}┼${b}┤"; fi
-              out+=$'\n'"$(printf '│ %-*s │ %-*s │' "$lw" "$k" "$vw" "$v")"
-            done
-            out+=$'\n'"└${a}┴${b}┘"
-            printf '%s' "$out"
-          }
+          # Satu baris tabel: row "label" "nilai"
+          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$1" "$(esc <<< "$2")"; }
 
           # render <status KSU-AOSP> <status KSU-OEM> <status Non-KSU> [footer]
+          # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
           render() {
-            local t
-            t="<b>AGNI REFORGE</b>"$'\n'"<pre>$(tbl "KSU-AOSP" "$1" "KSU-OEM" "$2" "Non-KSU" "$3")</pre>"
-            t+=$'\n'"<pre>$(tbl "Branch" "$(esc <<< "$GITHUB_REF_NAME")" "Build" "#${BUILD_TIME}" "Run" "#${GITHUB_RUN_NUMBER}")</pre>"
-            if [ -n "${4:-}" ]; then t+=$'\n\n'"$4"; fi
-            printf '%s' "$t"
+            local h
+            h="<table bordered><tr><th colspan=\"2\" align=\"center\">AGNI REFORGE</th></tr>"
+            h+="$(row "KSU-AOSP" "$1")$(row "KSU-OEM" "$2")$(row "Non-KSU" "$3")</table>"
+            h+="<table bordered>$(row "Branch" "$GITHUB_REF_NAME")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
+            if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
+            printf '%s' "$h"
           }
+
+          # Bungkus HTML jadi parameter rich_message
+          rich() { jq -nc --arg h "$1" '{html:$h, skip_entity_detection:true}'; }
 
 
           while true; do
