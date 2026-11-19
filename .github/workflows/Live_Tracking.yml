@@ -77,6 +77,7 @@ jobs:
 
           # URL CDN per varian (diisi setelah job build-nya sukses)
           URL_K=""; URL_O=""; URL_N=""
+          NAME_K=""; NAME_O=""; NAME_N=""
           TRIED_K=0; TRIED_O=0; TRIED_N=0
 
           duration() {
@@ -91,8 +92,15 @@ jobs:
             fi
           }
 
+          # Potong teks panjang jadi "...": trunc "teks" [maks]
+          trunc() {
+            local t="$1" m="${2:-22}"
+            if [ "${#t}" -gt "$m" ]; then printf '%s...' "${t:0:$((m-3))}"; else printf '%s' "$t"; fi
+          }
+
+          # step <json job> [nama file zip]
           step() {
-            local j="$1" s c n t start now elapsed
+            local j="$1" nm="${2:-}" s c n t start now elapsed
 
             [ -z "$j" ] || [ "$j" = "null" ] && { echo "⏳ Waiting"; return; }
 
@@ -101,10 +109,11 @@ jobs:
 
             if [ "$s" = completed ]; then
               if [ "$c" = success ]; then
-                echo "✅ Done"
+                echo "✅ ${nm:-Done}"
               else
                 n="$(jq -r '.steps[] | select(.conclusion=="failure") | .name' <<< "$j" | head -1 | sed 's/[^ -~]//g; s/^ *//')"
-                echo "❌ Failed - ${n:-Failed}"
+                n="$(trunc "${n:-Failed}" 22)"
+                echo "❌ Failed - $n"
               fi
               return
             fi
@@ -114,6 +123,7 @@ jobs:
             if [ "$s" = in_progress ]; then
               n="$(jq -r '.steps[] | select(.status=="in_progress") | .name' <<< "$j" | head -1 | sed 's/[^ -~]//g; s/^ *//')"
               [ -n "$n" ] || { echo "🔄 Starting..."; return; }
+              n="$(trunc "$n" 22)"
 
               t="$(jq -r '.steps[] | select(.status=="in_progress") | .started_at' <<< "$j" | head -1)"
               start="$(date -d "$t" +%s 2>/dev/null || echo 0)"
@@ -126,9 +136,9 @@ jobs:
             echo "⏳ Waiting"
           }
 
-          # Ambil URL CDN dari artifact kecil "cdnurl-<varian>" yang diupload job build
-          get_url() {
-            local name="cdnurl-$1" arts aurl tmp
+          # Ambil isi file $2 dari artifact kecil "cdnurl-<varian>" yang diupload job build
+          get_art() {
+            local name="cdnurl-$1" file="$2" arts aurl tmp
             arts="$(curl -fsS \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
@@ -138,7 +148,7 @@ jobs:
             [ -n "$aurl" ] || return 0
             tmp="$(mktemp)"
             if curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "$aurl" -o "$tmp"; then
-              unzip -p "$tmp" cdn_url.txt 2>/dev/null | head -n 1 | tr -d '\r\n'
+              unzip -p "$tmp" "$file" 2>/dev/null | head -n 1 | tr -d '\r\n'
             fi
             rm -f "$tmp"
           }
@@ -146,9 +156,9 @@ jobs:
           # Tombol download per varian (hanya yang URL-nya sudah ada)
           build_kb() {
             jq -nrc --arg a "$URL_K" --arg o "$URL_O" --arg n "$URL_N" '
-              [ (if $a != "" then {text:"📥 Download AOSP",   url:$a} else empty end),
-                (if $o != "" then {text:"📥 Download OEM",    url:$o} else empty end),
-                (if $n != "" then {text:"📥 Download Non-KSU", url:$n} else empty end) ] as $b
+              [ (if $a != "" then {text:"📥 Download AOSP",   url:$a, style:"success"} else empty end),
+                (if $o != "" then {text:"📥 Download OEM",    url:$o, style:"success"} else empty end),
+                (if $n != "" then {text:"📥 Download Non-KSU", url:$n, style:"success"} else empty end) ] as $b
               | if ($b | length) == 0 then "" else {inline_keyboard: ($b | map([.]))} end'
           }
 
@@ -207,23 +217,23 @@ jobs:
             OEM="$(jq -c '.jobs[] | select(.name=="Reforging - KSU-OEM")' <<< "$JOBS" | head -1)"
             NON="$(jq -c '.jobs[] | select(.name=="Reforging - Non-KSU")' <<< "$JOBS" | head -1)"
 
-            KSUS="$(step "$KSU")"
-            OEMS="$(step "$OEM")"
-            NONS="$(step "$NON")"
-
             KC="$(jq -r '.conclusion // empty' <<< "$KSU")"
             OC="$(jq -r '.conclusion // empty' <<< "$OEM")"
             NC="$(jq -r '.conclusion // empty' <<< "$NON")"
 
             # Begitu sebuah varian sukses, ambil URL CDN-nya (satu kali percobaan)
-            if [ "$KC" = success ] && [ "$TRIED_K" -eq 0 ]; then URL_K="$(get_url KSU-AOSP)"; TRIED_K=1; fi
-            if [ "$OC" = success ] && [ "$TRIED_O" -eq 0 ]; then URL_O="$(get_url KSU-OEM)";  TRIED_O=1; fi
-            if [ "$NC" = success ] && [ "$TRIED_N" -eq 0 ]; then URL_N="$(get_url Non-KSU)";  TRIED_N=1; fi
+            if [ "$KC" = success ] && [ "$TRIED_K" -eq 0 ]; then URL_K="$(get_art KSU-AOSP cdn_url.txt)"; NAME_K="$(get_art KSU-AOSP zip_name.txt)"; TRIED_K=1; fi
+            if [ "$OC" = success ] && [ "$TRIED_O" -eq 0 ]; then URL_O="$(get_art KSU-OEM cdn_url.txt)";  NAME_O="$(get_art KSU-OEM zip_name.txt)";  TRIED_O=1; fi
+            if [ "$NC" = success ] && [ "$TRIED_N" -eq 0 ]; then URL_N="$(get_art Non-KSU cdn_url.txt)";  NAME_N="$(get_art Non-KSU zip_name.txt)";  TRIED_N=1; fi
+
+            KSUS="$(step "$KSU" "$NAME_K")"
+            OEMS="$(step "$OEM" "$NAME_O")"
+            NONS="$(step "$NON" "$NAME_N")"
 
             KEYBOARD="$(build_kb)"
 
             if [ "$KC" = success ] && [ "$OC" = success ] && [ "$NC" = success ]; then
-            TEXT="$(render "✅ Done" "✅ Done" "✅ Done" "✅ All builds completed successfully.")"
+            TEXT="$(render "$KSUS" "$OEMS" "$NONS" "✅ All builds completed successfully.")"
 
               update "$TEXT" "$KEYBOARD" || true
               exit 0
@@ -436,13 +446,20 @@ jobs:
           printf '%s' "$URL" > cdn_url.txt
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      # Artifact kecil berisi URL CDN, dibaca oleh job Telegram Live Tracker untuk tombol download
+      # Artifact kecil berisi URL CDN + nama zip, dibaca oleh job Telegram Live Tracker
       - name: 🔗 Publish CDN URL for Tracker
+        if: steps.cdn.outputs.url != ''
+        shell: bash
+        run: printf '%s' "$ZIP_NAME" > zip_name.txt
+
+      - name: 🔗 Upload CDN URL Artifact
         if: steps.cdn.outputs.url != ''
         uses: actions/upload-artifact@v7
         with:
           name: cdnurl-${{ matrix.build_type }}
-          path: cdn_url.txt
+          path: |
+            cdn_url.txt
+            zip_name.txt
 
   final:
     name: Final
