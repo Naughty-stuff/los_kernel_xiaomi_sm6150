@@ -34,10 +34,9 @@ jobs:
           zw() { sed 's/\([-_]\)/\1\xe2\x80\x8b/g'; }
           row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb | zw)"; }
 
-          # Lebarkan label dengan nbsp (tak terlihat) supaya kolom label tidak terjepit
-          # nilai yang panjang. Naikkan angkanya kalau label masih pecah, turunkan kalau nilai terlalu sempit.
-          LABEL_W=9
-          lbl() { local s="$1" i; for ((i=${#s}; i<LABEL_W; i++)); do s+="&nbsp;"; done; printf '%s' "$s"; }
+          # Lebarkan label dengan N spasi tak terlihat (nbsp) supaya kolom label tidak terjepit
+          # nilai yang panjang: lbl "teks" N. Naikkan N kalau label masih pecah.
+          lbl() { local s="$1" n="${2:-0}" i; for ((i=0; i<n; i++)); do s+="&nbsp;"; done; printf '%s' "$s"; }
 
           # Tombol URL hijau di dalam pesan (Rich Message): btn "teks" "url"
           btn() {
@@ -51,7 +50,7 @@ jobs:
           render() {
             local h
             h="<table bordered><tr><th colspan=\"2\" align=\"center\">🔨 AGNI REFORGE</th></tr>"
-            h+="$(row "$(lbl KSU-AOSP)" "$1")$(row "$(lbl KSU-OEM)" "$2")$(row "$(lbl Non-KSU)" "$3")</table>"
+            h+="$(row "$(lbl "🤖 AOSP" 0)" "$1")$(row "$(lbl "🛡️ OEM" 1)" "$2")$(row "$(lbl Non-KSU 0)" "$3")</table>"
             h+="<table bordered>$(row "Device" "Sweet2")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
             if [ -n "${URL_K:-}" ]; then h+="$(btn "📥 Download AOSP" "$URL_K")"; fi
@@ -202,10 +201,9 @@ jobs:
           zw() { sed 's/\([-_]\)/\1\xe2\x80\x8b/g'; }
           row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb | zw)"; }
 
-          # Lebarkan label dengan nbsp (tak terlihat) supaya kolom label tidak terjepit
-          # nilai yang panjang. Naikkan angkanya kalau label masih pecah, turunkan kalau nilai terlalu sempit.
-          LABEL_W=9
-          lbl() { local s="$1" i; for ((i=${#s}; i<LABEL_W; i++)); do s+="&nbsp;"; done; printf '%s' "$s"; }
+          # Lebarkan label dengan N spasi tak terlihat (nbsp) supaya kolom label tidak terjepit
+          # nilai yang panjang: lbl "teks" N. Naikkan N kalau label masih pecah.
+          lbl() { local s="$1" n="${2:-0}" i; for ((i=0; i<n; i++)); do s+="&nbsp;"; done; printf '%s' "$s"; }
 
           # Tombol URL hijau di dalam pesan (Rich Message): btn "teks" "url"
           btn() {
@@ -219,7 +217,7 @@ jobs:
           render() {
             local h
             h="<table bordered><tr><th colspan=\"2\" align=\"center\">🔨 AGNI REFORGE</th></tr>"
-            h+="$(row "$(lbl KSU-AOSP)" "$1")$(row "$(lbl KSU-OEM)" "$2")$(row "$(lbl Non-KSU)" "$3")</table>"
+            h+="$(row "$(lbl "🤖 AOSP" 0)" "$1")$(row "$(lbl "🛡️ OEM" 1)" "$2")$(row "$(lbl Non-KSU 0)" "$3")</table>"
             h+="<table bordered>$(row "Device" "Sweet2")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
             if [ -n "${URL_K:-}" ]; then h+="$(btn "📥 Download AOSP" "$URL_K")"; fi
