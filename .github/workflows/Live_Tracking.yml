@@ -29,7 +29,8 @@ jobs:
           esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
           # Satu baris tabel: row "label" "nilai"
-          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$1" "$(esc <<< "$2")"; }
+          nb() { sed 's/^\([^ ]*\) /\1\&nbsp;/'; }
+          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb)"; }
 
           # render <status KSU-AOSP> <status KSU-OEM> <status Non-KSU> [footer]
           # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
@@ -94,7 +95,7 @@ jobs:
 
           # Potong teks panjang jadi "...": trunc "teks" [maks]
           trunc() {
-            local t="$1" m="${2:-22}"
+            local t="$1" m="${2:-19}"
             if [ "${#t}" -gt "$m" ]; then printf '%s...' "${t:0:$((m-3))}"; else printf '%s' "$t"; fi
           }
 
@@ -112,8 +113,7 @@ jobs:
                 echo "✅ ${nm:-Done}"
               else
                 n="$(jq -r '.steps[] | select(.conclusion=="failure") | .name' <<< "$j" | head -1 | sed 's/[^ -~]//g; s/^ *//')"
-                n="$(trunc "${n:-Failed}" 22)"
-                echo "❌ Failed - $n"
+                echo "❌ $(trunc "Failed - ${n:-Failed}" 19)"
               fi
               return
             fi
@@ -123,13 +123,12 @@ jobs:
             if [ "$s" = in_progress ]; then
               n="$(jq -r '.steps[] | select(.status=="in_progress") | .name' <<< "$j" | head -1 | sed 's/[^ -~]//g; s/^ *//')"
               [ -n "$n" ] || { echo "🔄 Starting..."; return; }
-              n="$(trunc "$n" 22)"
 
               t="$(jq -r '.steps[] | select(.status=="in_progress") | .started_at' <<< "$j" | head -1)"
               start="$(date -d "$t" +%s 2>/dev/null || echo 0)"
               now="$(date -u +%s)"
               elapsed=$((now-start))
-              echo "🔄 $(duration "$elapsed")  $n"
+              echo "🔄 $(trunc "$(duration "$elapsed") $n" 19)"
               return
             fi
 
@@ -190,7 +189,8 @@ jobs:
           esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 
           # Satu baris tabel: row "label" "nilai"
-          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$1" "$(esc <<< "$2")"; }
+          nb() { sed 's/^\([^ ]*\) /\1\&nbsp;/'; }
+          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb)"; }
 
           # render <status KSU-AOSP> <status KSU-OEM> <status Non-KSU> [footer]
           # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
