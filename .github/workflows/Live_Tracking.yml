@@ -30,7 +30,14 @@ jobs:
 
           # Satu baris tabel: row "label" "nilai"
           nb() { sed 's/^\([^ ]*\) /\1\&nbsp;/'; }
-          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb)"; }
+          # Sisipkan titik putus baris (zero-width space) setelah - dan _
+          zw() { sed 's/\([-_]\)/\1\xe2\x80\x8b/g'; }
+          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb | zw)"; }
+
+          # Lebarkan label dengan nbsp (tak terlihat) supaya kolom label tidak terjepit
+          # nilai yang panjang. Naikkan angkanya kalau label masih pecah, turunkan kalau nilai terlalu sempit.
+          LABEL_W=9
+          lbl() { local s="$1" i; for ((i=${#s}; i<LABEL_W; i++)); do s+="&nbsp;"; done; printf '%s' "$s"; }
 
           # Tombol URL hijau di dalam pesan (Rich Message): btn "teks" "url"
           btn() {
@@ -44,8 +51,8 @@ jobs:
           render() {
             local h
             h="<table bordered><tr><th colspan=\"2\" align=\"center\">🔨 AGNI REFORGE</th></tr>"
-            h+="$(row "🤖 KSU-AOSP" "$1")$(row "🛡️ KSU-OEM" "$2")$(row "🧩 Non-KSU" "$3")</table>"
-            h+="<table bordered>$(row "📱 Device" "Sweet2")$(row "🕒 Build" "#${BUILD_TIME}")$(row "🔢 Run" "#${GITHUB_RUN_NUMBER}")</table>"
+            h+="$(row "$(lbl KSU-AOSP)" "$1")$(row "$(lbl KSU-OEM)" "$2")$(row "$(lbl Non-KSU)" "$3")</table>"
+            h+="<table bordered>$(row "Device" "Sweet2")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
             if [ -n "${URL_K:-}" ]; then h+="$(btn "📥 Download AOSP" "$URL_K")"; fi
             if [ -n "${URL_O:-}" ]; then h+="$(btn "📥 Download OEM" "$URL_O")"; fi
@@ -191,7 +198,14 @@ jobs:
 
           # Satu baris tabel: row "label" "nilai"
           nb() { sed 's/^\([^ ]*\) /\1\&nbsp;/'; }
-          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb)"; }
+          # Sisipkan titik putus baris (zero-width space) setelah - dan _
+          zw() { sed 's/\([-_]\)/\1\xe2\x80\x8b/g'; }
+          row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb | zw)"; }
+
+          # Lebarkan label dengan nbsp (tak terlihat) supaya kolom label tidak terjepit
+          # nilai yang panjang. Naikkan angkanya kalau label masih pecah, turunkan kalau nilai terlalu sempit.
+          LABEL_W=9
+          lbl() { local s="$1" i; for ((i=${#s}; i<LABEL_W; i++)); do s+="&nbsp;"; done; printf '%s' "$s"; }
 
           # Tombol URL hijau di dalam pesan (Rich Message): btn "teks" "url"
           btn() {
@@ -205,8 +219,8 @@ jobs:
           render() {
             local h
             h="<table bordered><tr><th colspan=\"2\" align=\"center\">🔨 AGNI REFORGE</th></tr>"
-            h+="$(row "🤖 KSU-AOSP" "$1")$(row "🛡️ KSU-OEM" "$2")$(row "🧩 Non-KSU" "$3")</table>"
-            h+="<table bordered>$(row "📱 Device" "Sweet2")$(row "🕒 Build" "#${BUILD_TIME}")$(row "🔢 Run" "#${GITHUB_RUN_NUMBER}")</table>"
+            h+="$(row "$(lbl KSU-AOSP)" "$1")$(row "$(lbl KSU-OEM)" "$2")$(row "$(lbl Non-KSU)" "$3")</table>"
+            h+="<table bordered>$(row "Device" "Sweet2")$(row "Build" "#${BUILD_TIME}")$(row "Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
             if [ -n "${URL_K:-}" ]; then h+="$(btn "📥 Download AOSP" "$URL_K")"; fi
             if [ -n "${URL_O:-}" ]; then h+="$(btn "📥 Download OEM" "$URL_O")"; fi
@@ -410,7 +424,7 @@ jobs:
           cp out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img
           cp out/arch/arm64/boot/dtb.img AnyKernel3/dtb.img
 
-          ZIP_NAME="reforge_${BUILD_TYPE}-${SAFE_REF}-${BUILD_TIME}.zip"
+          ZIP_NAME="reforge_${BUILD_TYPE}-${BUILD_TIME}.zip"
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
 
           cd AnyKernel3
