@@ -32,6 +32,13 @@ jobs:
           nb() { sed 's/^\([^ ]*\) /\1\&nbsp;/'; }
           row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb)"; }
 
+          # Tombol URL hijau di dalam pesan (Rich Message): btn "teks" "url"
+          btn() {
+            local u
+            u="$(esc <<< "$2" | sed 's/"/\&quot;/g')"
+            printf '<tg-button-row><tg-button type="url" url="%s" style="success">%s</tg-button></tg-button-row>' "$u" "$1"
+          }
+
           # render <status KSU-AOSP> <status KSU-OEM> <status Non-KSU> [footer]
           # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
           render() {
@@ -40,6 +47,9 @@ jobs:
             h+="$(row "🤖 KSU-AOSP" "$1")$(row "🛡️ KSU-OEM" "$2")$(row "🧩 Non-KSU" "$3")</table>"
             h+="<table bordered>$(row "📱 Device" "Sweet2")$(row "🕒 Build" "#${BUILD_TIME}")$(row "🔢 Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
+            if [ -n "${URL_K:-}" ]; then h+="$(btn "📥 Download AOSP" "$URL_K")"; fi
+            if [ -n "${URL_O:-}" ]; then h+="$(btn "📥 Download OEM" "$URL_O")"; fi
+            if [ -n "${URL_N:-}" ]; then h+="$(btn "📥 Download Non-KSU" "$URL_N")"; fi
             printf '%s' "$h"
           }
 
@@ -152,15 +162,6 @@ jobs:
             rm -f "$tmp"
           }
 
-          # Tombol download per varian (hanya yang URL-nya sudah ada)
-          build_kb() {
-            jq -nrc --arg a "$URL_K" --arg o "$URL_O" --arg n "$URL_N" '
-              [ (if $a != "" then {text:"📥 Download AOSP",   url:$a, style:"success"} else empty end),
-                (if $o != "" then {text:"📥 Download OEM",    url:$o, style:"success"} else empty end),
-                (if $n != "" then {text:"📥 Download Non-KSU", url:$n, style:"success"} else empty end) ] as $b
-              | if ($b | length) == 0 then "" else {inline_keyboard: ($b | map([.]))} end'
-          }
-
           update() {
             local text="$1" markup="${2:-}" r d key
             local args=()
@@ -192,6 +193,13 @@ jobs:
           nb() { sed 's/^\([^ ]*\) /\1\&nbsp;/'; }
           row() { printf '<tr><th align="left">%s</th><td>%s</td></tr>' "$(nb <<< "$1")" "$(esc <<< "$2" | nb)"; }
 
+          # Tombol URL hijau di dalam pesan (Rich Message): btn "teks" "url"
+          btn() {
+            local u
+            u="$(esc <<< "$2" | sed 's/"/\&quot;/g')"
+            printf '<tg-button-row><tg-button type="url" url="%s" style="success">%s</tg-button></tg-button-row>' "$u" "$1"
+          }
+
           # render <status KSU-AOSP> <status KSU-OEM> <status Non-KSU> [footer]
           # Output: HTML Rich Message (Bot API 10.1+) berisi tabel native Telegram
           render() {
@@ -200,6 +208,9 @@ jobs:
             h+="$(row "🤖 KSU-AOSP" "$1")$(row "🛡️ KSU-OEM" "$2")$(row "🧩 Non-KSU" "$3")</table>"
             h+="<table bordered>$(row "📱 Device" "Sweet2")$(row "🕒 Build" "#${BUILD_TIME}")$(row "🔢 Run" "#${GITHUB_RUN_NUMBER}")</table>"
             if [ -n "${4:-}" ]; then h+="<p>$(esc <<< "$4")</p>"; fi
+            if [ -n "${URL_K:-}" ]; then h+="$(btn "📥 Download AOSP" "$URL_K")"; fi
+            if [ -n "${URL_O:-}" ]; then h+="$(btn "📥 Download OEM" "$URL_O")"; fi
+            if [ -n "${URL_N:-}" ]; then h+="$(btn "📥 Download Non-KSU" "$URL_N")"; fi
             printf '%s' "$h"
           }
 
@@ -230,12 +241,10 @@ jobs:
             OEMS="$(step "$OEM" "$NAME_O")"
             NONS="$(step "$NON" "$NAME_N")"
 
-            KEYBOARD="$(build_kb)"
-
             if [ "$KC" = success ] && [ "$OC" = success ] && [ "$NC" = success ]; then
             TEXT="$(render "$KSUS" "$OEMS" "$NONS" "✅ All builds completed successfully.")"
 
-              update "$TEXT" "$KEYBOARD" || true
+              update "$TEXT" || true
               exit 0
             fi
 
@@ -245,14 +254,14 @@ jobs:
                  [[ "$NC" =~ ^(failure|cancelled|timed_out)$ ]]; then
               TEXT="$(render "$KSUS" "$OEMS" "$NONS" "❌ One or more builds failed.")"
 
-                update "$TEXT" "$KEYBOARD" || true
+                update "$TEXT" || true
                 exit 0
               fi
             fi
 
             TEXT="$(render "$KSUS" "$OEMS" "$NONS")"
 
-            update "$TEXT" "$KEYBOARD" || true
+            update "$TEXT" || true
             sleep 7
           done
 
